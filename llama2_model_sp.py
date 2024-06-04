@@ -279,7 +279,6 @@ class Attention(nn.Module):
         output = output.view(bsz, seqlen, -1)
         out = self.wo(output)
         
-        print(f"out shape: {out.shape}")
         # NOTE(TP-SP) reducescatter output tensor
         # local_out = torch.chunk(out, tp_degree, dim=1)[local_rank]
         return out

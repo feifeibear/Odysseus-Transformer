@@ -12,9 +12,9 @@
 SCRIPT="sp_example.py"
 
 # docker exec -it 888c58e74578 bash
-
-echo "Launching ${1:-fsdp_tp_example.py} with ${2:-4} gpus"
-torchrun --nnodes=1 --nproc_per_node=${2:-8} --rdzv_id=101 --rdzv_endpoint="localhost:5972" $SCRIPT
+GPU_NUM=8
+echo "Launching with ${GPU_NUM} gpus"
+torchrun --nnodes=1 --nproc_per_node=${GPU_NUM} --rdzv_id=101 --rdzv_endpoint="localhost:5972" $SCRIPT
 
 
 # torchrun --nnodes=1 --nproc_per_node=8 --rdzv_id=101 --rdzv_endpoint="localhost:5972" test_ring.py
