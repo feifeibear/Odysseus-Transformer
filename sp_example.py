@@ -27,7 +27,7 @@ parser.add_argument('--parallel_strategy', type=str, default='SP',
 parser.add_argument(
     "--use_profiler",
     action="store_true",
-    default=True,
+    default=False,
     help="use torch profiler",
 )
 
@@ -68,7 +68,7 @@ assert (
 
 
 # create a sharding plan based on the given world_size.
-dp_size = _world_size // tp_size
+dp_size = _world_size 
 
 if not torch.distributed.is_initialized():
     torch.distributed.init_process_group("nccl")
@@ -100,9 +100,9 @@ elif parallel_strategy == "TP-SP":
 # init model weights
 model.init_weights()
 
-# if parallel_strategy == "SP":
-#     model.layers[0].feed_forward = FSDP(model.layers[0].feed_forward)
-#     model.layers[1].feed_forward = FSDP(model.layers[1].feed_forward)
+if parallel_strategy == "SP":
+    model.layers[0].feed_forward = FSDP(model.layers[0].feed_forward)
+    model.layers[1].feed_forward = FSDP(model.layers[1].feed_forward)
 
 
     
