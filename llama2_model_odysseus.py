@@ -15,6 +15,16 @@ from fairscale.nn.model_parallel.layers import (
 )
 import fairscale.nn.model_parallel.initialize as fs_init
 from fairscale_patch import RowParallelLinearRS
+from fairscale.nn.model_parallel.mappings import (
+    gather_from_model_parallel_region,
+    reduce_from_model_parallel_region,
+)
+
+try:
+    from yunchang import UlyssesAttention
+except ImportError:
+    print("yunchang not found")
+
 
 @dataclass
 class SPModelArgs:
@@ -28,7 +38,7 @@ class SPModelArgs:
     norm_eps: float = 1e-5
 
     max_batch_size: int = 32
-    max_seq_len: int = 32768
+    max_seq_len: int = 128 * 1024
     # If `True`, then each transformer block init uses its layer ID, and if
     # `False`, each uses the total number of transformer blocks
     depth_init: bool = True
@@ -180,14 +190,13 @@ class Attention(nn.Module):
         # self.n_rep = self.n_heads // ≈.n_kv_heads
         # self.head_dim = model_args.dim // model_args.n_heads
 
-
         self.n_kv_heads = self.n_heads if self.n_kv_heads is None else self.n_kv_heads
         model_parallel_size = fs_init.get_model_parallel_world_size()
         self.n_local_heads = self.n_heads // model_parallel_size
         self.n_local_kv_heads = self.n_kv_heads // model_parallel_size
         self.n_rep = self.n_local_heads // self.n_local_kv_heads
         self.head_dim = model_args.dim // self.n_heads
-        
+
         # self.wq = nn.Linear(
         #     model_args.dim, model_args.n_heads * self.head_dim, bias=False
         # )
@@ -197,33 +206,35 @@ class Attention(nn.Module):
         #     model_args.n_heads * self.head_dim, model_args.dim, bias=False
         # )
 
-
-
         self.wq = ColumnParallelLinear(
-            model_args.dim, self.n_kv_heads * self.head_dim,
+            model_args.dim,
+            self.n_kv_heads * self.head_dim,
             bias=False,
             gather_output=False,
             init_method=lambda x: x,
         )
         self.wk = ColumnParallelLinear(
-            model_args.dim, self.n_kv_heads * self.head_dim,
+            model_args.dim,
+            self.n_kv_heads * self.head_dim,
             bias=False,
             gather_output=False,
             init_method=lambda x: x,
         )
         self.wv = ColumnParallelLinear(
-            model_args.dim, self.n_kv_heads * self.head_dim,
+            model_args.dim,
+            self.n_kv_heads * self.head_dim,
             bias=False,
             gather_output=False,
             init_method=lambda x: x,
         )
         self.wo = RowParallelLinearRS(
             self.n_kv_heads * self.head_dim,
-            model_args.dim, 
+            model_args.dim,
             bias=False,
             input_is_parallel=True,
             init_method=lambda x: x,
         )
+
     def init_weights(self, init_std: float):
         for linear in (self.wq, self.wk, self.wv):
             nn.init.trunc_normal_(linear.weight, mean=0.0, std=0.02)
@@ -245,17 +256,23 @@ class Attention(nn.Module):
             torch.Tensor: Output tensor after attention.
 
         """
-        
+
         # NOTE(TP-SP) allgather input tensor
-        tp_pg = fs_init.get_model_parallel_group()
-        tp_degree = tp_pg.size()
-        local_rank = fs_init.get_model_parallel_rank()
-        tensor_list = [torch.empty_like(x) for _ in range(tp_degree)]
-        dist.all_gather(tensor_list, x, group=tp_pg)
-        x = torch.cat(tensor_list, dim=1)
+        # TODO(jiarui) implenent with torch Function
+        # tp_pg = fs_init.get_model_parallel_group()
+        # tp_degree = tp_pg.size()
+        # local_rank = fs_init.get_model_parallel_rank()
+        # tensor_list = [torch.empty_like(x) for _ in range(tp_degree)]
+        # dist.all_gather(tensor_list, x, group=tp_pg)
+        # x = torch.cat(tensor_list, dim=1)
+        bsz, seqlen, h = x.shape
+        assert bsz == 1, f"Batch size {bsz} must be 1 for SP Attention"
+        x = x.view(bsz * seqlen, h)
+        x = gather_from_model_parallel_region(x)
+        x = x.view(bsz, -1, h)
 
         bsz, seqlen, _ = x.shape
-        
+
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
         xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
@@ -278,9 +295,8 @@ class Attention(nn.Module):
         ).contiguous()  # (bs, seqlen, n_local_heads, head_dim)
         output = output.view(bsz, seqlen, -1)
         out = self.wo(output)
-        
+
         # NOTE(TP-SP) reducescatter output tensor
-        # local_out = torch.chunk(out, tp_degree, dim=1)[local_rank]
         return out
 
 
@@ -327,6 +343,7 @@ class FeedForward_SP(nn.Module):
         for linear in (self.w2, self.w3):
             nn.init.trunc_normal_(linear.weight, mean=0.0, std=init_std)
 
+
 class FeedForward(nn.Module):
     """
     FeedForward module
@@ -371,7 +388,7 @@ class FeedForward(nn.Module):
         self.w3 = ColumnParallelLinear(
             dim, hidden_dim, bias=False, gather_output=False, init_method=lambda x: x
         )
-        
+
     def forward(self, x):
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
 
@@ -379,6 +396,7 @@ class FeedForward(nn.Module):
         nn.init.trunc_normal_(self.w1.weight, mean=0.0, std=0.02)
         for linear in (self.w2, self.w3):
             nn.init.trunc_normal_(linear.weight, mean=0.0, std=init_std)
+
 
 class TransformerBlock(nn.Module):
     """
@@ -414,12 +432,8 @@ class TransformerBlock(nn.Module):
         self.layer_id = layer_id
         self.num_layers = model_args.n_layers
 
-        self.attention_norm = RMSNorm(
-            dim=model_args.dim, eps=model_args.norm_eps
-        )
-        self.ffn_norm = RMSNorm(
-            dim=model_args.dim, eps=model_args.norm_eps
-        )
+        self.attention_norm = RMSNorm(dim=model_args.dim, eps=model_args.norm_eps)
+        self.ffn_norm = RMSNorm(dim=model_args.dim, eps=model_args.norm_eps)
 
         if model_args.depth_init:
             self.weight_init_std = 0.02 / (2 * (self.layer_id + 1)) ** 0.5
@@ -479,11 +493,7 @@ class SPTransformer(nn.Module):
         self.n_layers = model_args.n_layers
         self.model_dim = model_args.dim
 
-        self.tok_embeddings = ParallelEmbedding(
-            model_args.vocab_size, model_args.dim
-        )
-                
-        # self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
+        self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
         self.register_buffer(
             "freqs_cis",
             precompute_freqs_cis(
@@ -497,14 +507,9 @@ class SPTransformer(nn.Module):
         for layer_id in range(model_args.n_layers):
             self.layers.append(TransformerBlock(layer_id, model_args))
 
-        self.norm = RMSNorm(
-            dim=model_args.dim, eps=model_args.norm_eps
-        )
+        self.norm = RMSNorm(dim=model_args.dim, eps=model_args.norm_eps)
 
-        # self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
-        self.output = ColumnParallelLinear(
-            model_args.dim, model_args.vocab_size, bias=False, init_method=lambda x: x
-        )
+        self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
         self.init_weights()
 
     def init_weights(self):
@@ -553,21 +558,22 @@ class SPTransformer(nn.Module):
         """
         _bsz, seqlen = tokens.shape
         h = self.tok_embeddings(tokens)
-        
+
         # NOTE(TP-SP) shard tensor h into tp_degree pieces along the seqlen dim.
         tp_pg = fs_init.get_model_parallel_group()
         tp_degree = tp_pg.size()
         local_rank = fs_init.get_model_parallel_rank()
-        h = h.chunk(tp_degree, dim=1)[local_rank]   
-        
+
         self.freqs_cis = self.freqs_cis.to(h.device)
-        freqs_cis = self.freqs_cis[0: seqlen]
+        freqs_cis = self.freqs_cis[0 : seqlen * tp_degree]
 
         for layer in self.layers:
             h = layer(h, freqs_cis)
         h = self.norm(h)
         output = self.output(h).float()
-        return output
+
+        output = torch.sum(output, dim=1)
+        return reduce_from_model_parallel_region(output)
 
     @classmethod
     def from_model_args(cls, model_args: SPModelArgs) -> "SPTransformer":
