@@ -1,6 +1,11 @@
 ## Odysseus: Upgrade DeepSpeed-Ulysses by Decoupling the Parallel Strategies of Attention and FFN
 
-This repository delves into the optimal parallelization strategies for long-sequence LLMs, implementing four methods: Tensor Parallelism (TP), Tensor Parallelism with Sequence Parallelism (TP-SP), DeepSpeed-Ulysses, and Odysseus. 
+This repository delves into the optimal parallelization strategies for long-sequence LLMs, implementing four methods: 
+1. [Tensor Parallelism (TP)](https://arxiv.org/abs/1909.08053), the classical implementation proposed by Megatron-LM, using AllReduce for activation communications.
+2. [Tensor Parallelism with Sequence Parallelism (TP-SP)](https://arxiv.org/abs/2205.05198), refer to MLSys 23' paper: Reducing Activation Recomputation in Large Transformer Models.
+3. [DeepSpeed-Ulysses](https://arxiv.org/abs/2309.14509), refer to paper: DeepSpeed Ulysses: System Optimizations for Enabling Training of Extreme Long Sequence Transformer Models.
+4. Odysseus. A novel method proposed in this repo.
+
 As you can see, we involve both tensor parallelism and sequence parallelism here.
 The commonality among these methods is that they all require partitioning along the head number dimension, thus the degree of parallelism is constrained by the head number. We have excluded Ring-Attention as it can be used orthogonally with these four methods.
 
@@ -8,7 +13,7 @@ Odysseus, our novel sequence parallel approach, decouples the parallelization of
 
 The communication and memory costs of these four methods are summarized in the table below. Among them, RS stands for ReduceScatter, and AG stands for AllGather. L represents the sequence length, d is the hidden dimension, i is the intermediate hidden size, with GPT-4 having i = 4d, and N denotes the number of GPUs.
 
-当序列很长，具体来说L>i时，Odysseus+ZeRO在通信开销上低于TP-SP和Ulysses+ZeRO3。并且三者显存消耗保持一致。
+When the sequence length $L$ exceeds the intermediate hidden size $i$ ($L$ > i), Odysseus+ZeRO3 demonstrates lower communication cost compared to TP-SP and Ulysses+ZeRO3. Notably, all three methods maintain similar memory consumption.
 
 | Method          | Comm Activation | Comm Volume       | Comm Gradient | Comm Volume                   | Mem Activation | Mem Param/Grad |
 |-----------------|------------|--------------|----------|--------------------------|------------|------------|
@@ -23,6 +28,7 @@ The communication and memory costs of these four methods are summarized in the t
 3. bash run_example.sh
 
 ### TODO:
+The repo is work in progress.
 
 1. Our TP-SP implementation stores the full shape tensor after allgather in GPU memory before the backward pass, resulting in an Activation memory cost greater than 1/N. Our implementation does not strictly adhere to the paper.
 
