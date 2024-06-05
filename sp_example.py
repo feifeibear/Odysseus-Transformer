@@ -22,7 +22,7 @@ import argparse
 
 parser = argparse.ArgumentParser(description="PyTorch Distributed Training Example")
 
-# TP-SP: 0.7902135848999023
+# TP: 0.7902135848999023
 # SP: 0.38678812980651855
 # Ulysses: 0.33405160903930664
 parser.add_argument(
@@ -30,7 +30,7 @@ parser.add_argument(
     type=str,
     default="Odysseus",
     help="parallel strategy to use (default: Odysseus)",
-    choices=["Odysseus", "TP-SP", "Ulysses"],
+    choices=["Odysseus", "TP", "TP-SP", "Ulysses"],
 )
 parser.add_argument(
     "--use_profiler",
@@ -113,6 +113,16 @@ if parallel_strategy == "Odysseus":
     )
     model = SPTransformer(model_args).to(torch.bfloat16).to(f"cuda:{tp_rank}")
 elif parallel_strategy == "TP-SP":
+    model_args = SPModelArgs(
+        dim=256,
+        n_layers=layer_num,
+        n_heads=16,
+        vocab_size=vocabsize,
+        max_seq_len=args.seqlen,
+        use_ffn_tp=True,
+    )
+    model = SPTransformer(model_args).to(torch.bfloat16).to(f"cuda:{tp_rank}")
+elif parallel_strategy == "TP":
     model_args = TPModelArgs(
         dim=256,
         n_layers=layer_num,
@@ -137,7 +147,7 @@ else:
 model.init_weights()
 
 cpu_offload = torch.distributed.fsdp.CPUOffload(False)
-shard_spec = torch.distributed.fsdp.ShardingStrategy.NO_SHARD  # FULL_SHARD
+shard_spec = torch.distributed.fsdp.ShardingStrategy.FULL_SHARD  # FULL_SHARD
 
 if parallel_strategy == "Odysseus":
     ignored_modules = []
@@ -189,7 +199,7 @@ with ctx as prof:
         torch.manual_seed(i)
         inp = torch.randint(vocabsize, (bs, seqlen), device=f"cuda:{tp_rank}")
         target = torch.randint(vocabsize, (bs, seqlen), device=f"cuda:{tp_rank}")
-        if parallel_strategy == "Ulysses" or parallel_strategy == "Odysseus":
+        if parallel_strategy in ["Ulysses", "Odysseus", "TP-SP"]:
             inp = inp.chunk(tp_size, dim=1)[tp_rank]
             target = target.chunk(tp_size, dim=1)[tp_rank]
 
