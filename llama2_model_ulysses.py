@@ -7,16 +7,16 @@ from typing import Optional, Tuple
 import torch
 import torch.nn.functional as F
 from torch import nn
-from fairscale.nn.model_parallel.layers import (
-    ColumnParallelLinear,
-    ParallelEmbedding,
-    RowParallelLinear,
-)
+
+try:
+    from yunchang import UlyssesAttention
+except ImportError:
+    print("yunchang not found")
 import fairscale.nn.model_parallel.initialize as fs_init
 
 
 @dataclass
-class TPModelArgs:
+class UlyssesSPModelArgs:
     dim: int = 4096
     n_layers: int = 32
     n_heads: int = 32
@@ -168,7 +168,7 @@ class Attention(nn.Module):
 
     """
 
-    def __init__(self, model_args: TPModelArgs):
+    def __init__(self, model_args: UlyssesSPModelArgs):
         super().__init__()
         self.n_heads = model_args.n_heads
         self.n_kv_heads = (
@@ -176,53 +176,20 @@ class Attention(nn.Module):
             if model_args.n_kv_heads is None
             else model_args.n_kv_heads
         )
-        # self.n_rep = self.n_heads // ≈.n_kv_heads
-        # self.head_dim = model_args.dim // model_args.n_heads
+        self.n_rep = self.n_heads // self.n_kv_heads
+        self.head_dim = model_args.dim // model_args.n_heads
 
-        self.n_kv_heads = self.n_heads if self.n_kv_heads is None else self.n_kv_heads
-        model_parallel_size = fs_init.get_model_parallel_world_size()
-        self.n_local_heads = self.n_heads // model_parallel_size
-        self.n_local_kv_heads = self.n_kv_heads // model_parallel_size
-        self.n_rep = self.n_local_heads // self.n_local_kv_heads
-        self.head_dim = model_args.dim // self.n_heads
+        self.wq = nn.Linear(
+            model_args.dim, model_args.n_heads * self.head_dim, bias=False
+        )
+        self.wk = nn.Linear(model_args.dim, self.n_kv_heads * self.head_dim, bias=False)
+        self.wv = nn.Linear(model_args.dim, self.n_kv_heads * self.head_dim, bias=False)
+        self.wo = nn.Linear(
+            model_args.n_heads * self.head_dim, model_args.dim, bias=False
+        )
 
-        # self.wq = nn.Linear(
-        #     model_args.dim, model_args.n_heads * self.head_dim, bias=False
-        # )
-        # self.wk = nn.Linear(model_args.dim, self.n_kv_heads * self.head_dim, bias=False)
-        # self.wv = nn.Linear(model_args.dim, self.n_kv_heads * self.head_dim, bias=False)
-        # self.wo = nn.Linear(
-        #     model_args.n_heads * self.head_dim, model_args.dim, bias=False
-        # )
-
-        self.wq = ColumnParallelLinear(
-            model_args.dim,
-            self.n_kv_heads * self.head_dim,
-            bias=False,
-            gather_output=False,
-            init_method=lambda x: x,
-        )
-        self.wk = ColumnParallelLinear(
-            model_args.dim,
-            self.n_kv_heads * self.head_dim,
-            bias=False,
-            gather_output=False,
-            init_method=lambda x: x,
-        )
-        self.wv = ColumnParallelLinear(
-            model_args.dim,
-            self.n_kv_heads * self.head_dim,
-            bias=False,
-            gather_output=False,
-            init_method=lambda x: x,
-        )
-        self.wo = RowParallelLinear(
-            self.n_kv_heads * self.head_dim,
-            model_args.dim,
-            bias=False,
-            input_is_parallel=True,
-            init_method=lambda x: x,
-        )
+        self.pg = fs_init.get_model_parallel_group()
+        self.ulysses_attn = UlyssesAttention(self.pg)
 
     def init_weights(self, init_std: float):
         for linear in (self.wq, self.wk, self.wv):
@@ -248,24 +215,32 @@ class Attention(nn.Module):
         bsz, seqlen, _ = x.shape
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
-        xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-        xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-        xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
+        xq = xq.view(bsz, seqlen, self.n_heads, self.head_dim)
+        xk = xk.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
+        xv = xv.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
         xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
-        keys = repeat_kv(xk, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
-        values = repeat_kv(xv, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
+        output = self.ulysses_attn(
+            xq,
+            xk,
+            xv,
+            dropout_p=0.0,
+            causal=True,
+            return_attn_probs=True,
+        )
+        # keys = repeat_kv(xk, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
+        # values = repeat_kv(xv, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
 
-        xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
-        xk = keys.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
-        xv = values.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
+        # xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
+        # xk = keys.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
+        # xv = values.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
 
-        # we use casual mask for training
-        output = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
-        output = output.transpose(
-            1, 2
-        ).contiguous()  # (bs, seqlen, n_local_heads, head_dim)
+        # # we use casual mask for training
+        # output = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
+        # output = output.transpose(
+        #     1, 2
+        # ).contiguous()  # (bs, seqlen, n_local_heads, head_dim)
         output = output.view(bsz, seqlen, -1)
         return self.wo(output)
 
@@ -301,19 +276,9 @@ class FeedForward(nn.Module):
             hidden_dim = int(ffn_dim_multiplier * hidden_dim)
         hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
 
-        # self.w1 = nn.Linear(dim, hidden_dim, bias=False)
-        # self.w2 = nn.Linear(hidden_dim, dim, bias=False)
-        # self.w3 = nn.Linear(dim, hidden_dim, bias=False)
-
-        self.w1 = ColumnParallelLinear(
-            dim, hidden_dim, bias=False, gather_output=False, init_method=lambda x: x
-        )
-        self.w2 = RowParallelLinear(
-            hidden_dim, dim, bias=False, input_is_parallel=True, init_method=lambda x: x
-        )
-        self.w3 = ColumnParallelLinear(
-            dim, hidden_dim, bias=False, gather_output=False, init_method=lambda x: x
-        )
+        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+        self.w3 = nn.Linear(dim, hidden_dim, bias=False)
 
     def forward(self, x):
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
@@ -344,7 +309,7 @@ class TransformerBlock(nn.Module):
 
     """
 
-    def __init__(self, layer_id: int, model_args: TPModelArgs):
+    def __init__(self, layer_id: int, model_args: UlyssesSPModelArgs):
         super().__init__()
         self.n_heads = model_args.n_heads
         self.dim = model_args.dim
@@ -393,7 +358,7 @@ class TransformerBlock(nn.Module):
         self.feed_forward.init_weights(self.weight_init_std)
 
 
-class TPTransformer(nn.Module):
+class UlyssesSPTransformer(nn.Module):
     """
     Transformer Module
 
@@ -412,16 +377,17 @@ class TPTransformer(nn.Module):
 
     """
 
-    def __init__(self, model_args: TPModelArgs):
+    def __init__(self, model_args: UlyssesSPModelArgs):
         super().__init__()
         self.model_args = model_args
         self.vocab_size = model_args.vocab_size
         self.n_layers = model_args.n_layers
         self.model_dim = model_args.dim
 
-        self.tok_embeddings = ParallelEmbedding(model_args.vocab_size, model_args.dim)
+        self.pg = fs_init.get_model_parallel_group()
+        self.world_size = torch.distributed.get_world_size(group=self.pg)
 
-        # self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
+        self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
         self.register_buffer(
             "freqs_cis",
             precompute_freqs_cis(
@@ -437,10 +403,7 @@ class TPTransformer(nn.Module):
 
         self.norm = RMSNorm(dim=model_args.dim, eps=model_args.norm_eps)
 
-        # self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
-        self.output = ColumnParallelLinear(
-            model_args.dim, model_args.vocab_size, bias=False, init_method=lambda x: x
-        )
+        self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
         self.init_weights()
 
     def init_weights(self):
@@ -489,9 +452,6 @@ class TPTransformer(nn.Module):
         """
         _bsz, seqlen = tokens.shape
         h = self.tok_embeddings(tokens)
-        assert (
-            h.requires_grad
-        ), f"Input embedding should require grad, got {h.requires_grad}"
         self.freqs_cis = self.freqs_cis.to(h.device)
         freqs_cis = self.freqs_cis[0:seqlen]
 
@@ -499,10 +459,11 @@ class TPTransformer(nn.Module):
             h = layer(h, freqs_cis)
         h = self.norm(h)
         output = self.output(h).float()
+
         return output
 
     @classmethod
-    def from_model_args(cls, model_args: TPModelArgs) -> "Transformer":
+    def from_model_args(cls, model_args: UlyssesSPModelArgs) -> "UlyssesSPTransformer":
         """
         Initialize a Transformer model from a ModelArgs object.
 
