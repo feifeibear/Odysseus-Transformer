@@ -39,6 +39,7 @@ The repo is work in progress.
 
 2. Integrate Odysseus with Ring for hybrid parallelism.
 
+3. Now, the tesh code only support batch size=1. Hybriding with Data parallel is not considered.
 
 ### Acknowledgements
 The repo is built on [pytorch/example](https://github.com/pytorch/examples).
