@@ -10,7 +10,6 @@ from torch import nn
 from torch import distributed as dist
 from fairscale.nn.model_parallel.layers import (
     ColumnParallelLinear,
-    ParallelEmbedding,
     RowParallelLinear,
 )
 import fairscale.nn.model_parallel.initialize as fs_init
@@ -19,11 +18,6 @@ from fairscale.nn.model_parallel.mappings import (
     gather_from_model_parallel_region,
     reduce_from_model_parallel_region,
 )
-
-try:
-    from yunchang import UlyssesAttention
-except ImportError:
-    print("yunchang not found")
 
 
 @dataclass
@@ -42,6 +36,8 @@ class SPModelArgs:
     # If `True`, then each transformer block init uses its layer ID, and if
     # `False`, each uses the total number of transformer blocks
     depth_init: bool = True
+
+    use_ffn_tp: bool = False
 
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
@@ -86,6 +82,15 @@ def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     assert freqs_cis.shape == (x.shape[1], x.shape[-1])
     shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
     return freqs_cis.view(*shape)
+
+
+def _gether_bsz1(x):
+    bsz, seqlen, h = x.shape
+    assert bsz == 1, f"Batch size {bsz} must be 1 for SP Attention"
+    x = x.view(bsz * seqlen, h)
+    x = gather_from_model_parallel_region(x)
+    x = x.view(bsz, -1, h)
+    return x
 
 
 def apply_rotary_emb(
@@ -258,18 +263,7 @@ class Attention(nn.Module):
         """
 
         # NOTE(TP-SP) allgather input tensor
-        # TODO(jiarui) implenent with torch Function
-        # tp_pg = fs_init.get_model_parallel_group()
-        # tp_degree = tp_pg.size()
-        # local_rank = fs_init.get_model_parallel_rank()
-        # tensor_list = [torch.empty_like(x) for _ in range(tp_degree)]
-        # dist.all_gather(tensor_list, x, group=tp_pg)
-        # x = torch.cat(tensor_list, dim=1)
-        bsz, seqlen, h = x.shape
-        assert bsz == 1, f"Batch size {bsz} must be 1 for SP Attention"
-        x = x.view(bsz * seqlen, h)
-        x = gather_from_model_parallel_region(x)
-        x = x.view(bsz, -1, h)
+        x = _gether_bsz1(x)
 
         bsz, seqlen, _ = x.shape
 
@@ -382,7 +376,7 @@ class FeedForward(nn.Module):
         self.w1 = ColumnParallelLinear(
             dim, hidden_dim, bias=False, gather_output=False, init_method=lambda x: x
         )
-        self.w2 = RowParallelLinear(
+        self.w2 = RowParallelLinearRS(
             hidden_dim, dim, bias=False, input_is_parallel=True, init_method=lambda x: x
         )
         self.w3 = ColumnParallelLinear(
@@ -390,6 +384,7 @@ class FeedForward(nn.Module):
         )
 
     def forward(self, x):
+        x = _gether_bsz1(x)
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
 
     def init_weights(self, init_std: float):
@@ -423,7 +418,13 @@ class TransformerBlock(nn.Module):
         self.n_heads = model_args.n_heads
         self.dim = model_args.dim
         self.attention = Attention(model_args)
-        self.feed_forward = FeedForward_SP(
+
+        if model_args.use_ffn_tp:
+            ffn_fn = FeedForward
+        else:
+            ffn_fn = FeedForward_SP
+
+        self.feed_forward = ffn_fn(
             dim=model_args.dim,
             hidden_dim=4 * model_args.dim,
             multiple_of=model_args.multiple_of,
