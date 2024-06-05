@@ -9,7 +9,8 @@ This repository delves into the optimal parallelization strategies for long-sequ
 As you can see, we involve both tensor parallelism and sequence parallelism here.
 The commonality among these methods is that they all require partitioning along the head number dimension, thus the degree of parallelism is constrained by the head number. We have excluded Ring-Attention as it can be used orthogonally with these four methods.
 
-Odysseus, our novel sequence parallel approach, decouples the parallelization of Attention and FFN components within Transformers. Attention leverages TP-SP, partitioning QKVO weights and employing Allgather for hidden state inputs and output tensors, with ReduceScatter communication, segmenting Activation along the sequence dimension. FFN adopts sequence parallelism, dividing input by sequence dimension without Activation communication, focusing on gradient communication for parameters during backpropagation.
+As illustated in the below figure, **Odysseus**, our innovative sequence parallelization strategy, decouples the parallelization of Attention and FFN within Transformers. For Attention, it utilizes TP-SP to split Q, K, V, O Linear weights and uses allgather for input tensors and reducescatter for output tensors, segmenting Activation by sequence dimension. FFN implements naive sequence parallelism, splitting input by sequence dimension without requiring asynchronization on gradients during backpropagation.
+
 
 <div align="center">
     <img src="./media/Odysseus.jpg" alt="Image description">
@@ -38,6 +39,7 @@ The repo is work in progress.
 
 2. Integrate Odysseus with Ring for hybrid parallelism.
 
+3. Now, the tesh code only support batch size=1. Hybriding with Data parallel is not considered.
 
 ### Acknowledgements
 The repo is built on [pytorch/example](https://github.com/pytorch/examples).
