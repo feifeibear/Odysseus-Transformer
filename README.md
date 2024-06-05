@@ -11,6 +11,10 @@ The commonality among these methods is that they all require partitioning along 
 
 Odysseus, our novel sequence parallel approach, decouples the parallelization of Attention and FFN components within Transformers. Attention leverages TP-SP, partitioning QKVO weights and employing Allgather for hidden state inputs and output tensors, with ReduceScatter communication, segmenting Activation along the sequence dimension. FFN adopts sequence parallelism, dividing input by sequence dimension without Activation communication, focusing on gradient communication for parameters during backpropagation.
 
+<div align="center">
+    <img src="./media/Odysseus.jpg" alt="Image description">
+</div>
+
 The communication and memory costs of these four methods are summarized in the table below. Among them, RS stands for ReduceScatter, and AG stands for AllGather. L represents the sequence length, d is the hidden dimension, i is the intermediate hidden size, with GPT-4 having i = 4d, and N denotes the number of GPUs.
 
 When the sequence length $L$ exceeds the intermediate hidden size $i$ ($L$ > i), Odysseus+ZeRO3 demonstrates lower communication cost compared to TP-SP and Ulysses+ZeRO3. Notably, all three methods maintain similar memory consumption.
