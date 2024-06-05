@@ -266,7 +266,7 @@ class Attention(nn.Module):
         output = output.transpose(
             1, 2
         ).contiguous()  # (bs, seqlen, n_local_heads, head_dim)
-        output = output.view(bsz, seqlen, -1)
+        output = output.view(bsz, seqlen, -1)[:, -1, :]
         return self.wo(output)
 
 
@@ -499,6 +499,7 @@ class TPTransformer(nn.Module):
             h = layer(h, freqs_cis)
         h = self.norm(h)
         output = self.output(h).float()
+        output = torch.sum(output, dim=1)
         return output
 
     @classmethod

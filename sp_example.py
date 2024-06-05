@@ -5,7 +5,7 @@ import time
 from log_utils import rank_log, get_logger
 
 
-from llama2_model_sp import SPTransformer, SPModelArgs
+from llama2_model_odysseus import SPTransformer, SPModelArgs
 from llama2_model_tp import TPTransformer, TPModelArgs
 from llama2_model_ulysses import UlyssesSPTransformer, UlyssesSPModelArgs
 
@@ -28,9 +28,9 @@ parser = argparse.ArgumentParser(description="PyTorch Distributed Training Examp
 parser.add_argument(
     "--parallel_strategy",
     type=str,
-    default="Ulysses",
-    help="parallel strategy to use (default: SP)",
-    choices=["SP", "TP-SP", "Ulysses"],
+    default="Odysseus",
+    help="parallel strategy to use (default: Odysseus)",
+    choices=["Odysseus", "TP-SP", "Ulysses"],
 )
 parser.add_argument(
     "--use_profiler",
@@ -78,6 +78,7 @@ def init_prof(use_profiler):
     return ctx
 
 
+vocabsize = 32
 _rank = int(os.environ["RANK"])
 _world_size = int(os.environ["WORLD_SIZE"])
 tp_size = _world_size
@@ -102,15 +103,31 @@ tp_rank = get_model_parallel_rank()
 tp_pg = get_model_parallel_group()
 
 # create model and move it to GPU - init"cuda"_mesh has already mapped GPU ids.
-if parallel_strategy == "SP":
-    model_args = SPModelArgs(dim=256, n_layers=layer_num, n_heads=16, vocab_size=32000)
+if parallel_strategy == "Odysseus":
+    model_args = SPModelArgs(
+        dim=256,
+        n_layers=layer_num,
+        n_heads=16,
+        vocab_size=vocabsize,
+        max_seq_len=args.seqlen,
+    )
     model = SPTransformer(model_args).to(torch.bfloat16).to(f"cuda:{tp_rank}")
 elif parallel_strategy == "TP-SP":
-    model_args = TPModelArgs(dim=256, n_layers=layer_num, n_heads=16, vocab_size=32000)
+    model_args = TPModelArgs(
+        dim=256,
+        n_layers=layer_num,
+        n_heads=16,
+        vocab_size=vocabsize,
+        max_seq_len=args.seqlen,
+    )
     model = TPTransformer(model_args).to(torch.bfloat16).to(f"cuda:{tp_rank}")
 elif parallel_strategy == "Ulysses":
     model_args = UlyssesSPModelArgs(
-        dim=256, n_layers=layer_num, n_heads=16, vocab_size=32000
+        dim=256,
+        n_layers=layer_num,
+        n_heads=16,
+        vocab_size=vocabsize,
+        max_seq_len=args.seqlen,
     )
     model = UlyssesSPTransformer(model_args).to(torch.bfloat16).to(f"cuda:{tp_rank}")
 else:
@@ -119,13 +136,27 @@ else:
 # init model weights
 model.init_weights()
 
-if parallel_strategy == "SP":
+cpu_offload = torch.distributed.fsdp.CPUOffload(False)
+shard_spec = torch.distributed.fsdp.ShardingStrategy.NO_SHARD  # FULL_SHARD
+
+if parallel_strategy == "Odysseus":
+    ignored_modules = []
     for i in range(layer_num):
-        model.layers[i].feed_forward = FSDP(
-            model.layers[i].feed_forward, process_group=tp_pg
-        )
+        ignored_modules.append(model.layers[i].attention)
+    model = FSDP(
+        model,
+        ignored_modules=ignored_modules,
+        process_group=tp_pg,
+        sharding_strategy=shard_spec,
+        cpu_offload=cpu_offload,
+    )
 elif parallel_strategy == "Ulysses":
-    model = FSDP(model, process_group=tp_pg)
+    model = FSDP(
+        model,
+        process_group=tp_pg,
+        sharding_strategy=shard_spec,
+        cpu_offload=cpu_offload,
+    )
 
 rank_log(_rank, logger, f"Model after parallelization {model=}\n")
 
@@ -148,15 +179,19 @@ elapse = 0
 assert bs == 1, f"Batch size {bs} must be 1 for this test"
 ctx = init_prof(args.use_profiler)
 
+loss_fn = torch.nn.CrossEntropyLoss()
+
 with ctx as prof:
     for i in range(num_iterations):
         # seeding with tp_rank to ensure identical inputs for TP groups
         if i > warmup_num_iterations:
             start_time = time.time()
         torch.manual_seed(i)
-        inp = torch.randint(32000, (bs, seqlen), device=f"cuda:{tp_rank}")
-        if parallel_strategy == "Ulysses":
+        inp = torch.randint(vocabsize, (bs, seqlen), device=f"cuda:{tp_rank}")
+        target = torch.randint(vocabsize, (bs, seqlen), device=f"cuda:{tp_rank}")
+        if parallel_strategy == "Ulysses" or parallel_strategy == "Odysseus":
             inp = inp.chunk(tp_size, dim=1)[tp_rank]
+            target = target.chunk(tp_size, dim=1)[tp_rank]
 
         output = model(inp)
 
@@ -172,6 +207,11 @@ with ctx as prof:
         if args.use_profiler:
             prof.step()
 
+rank_log(
+    _rank,
+    logger,
+    f"Peak GPU memory allocated: {torch.cuda.max_memory_allocated() / 1024 ** 3:.2f} GB",
+)
 rank_log(
     _rank,
     logger,

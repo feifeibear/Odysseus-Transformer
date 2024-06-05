@@ -15,7 +15,10 @@ from fairscale.nn.model_parallel.layers import (
 )
 import fairscale.nn.model_parallel.initialize as fs_init
 from fairscale_patch import RowParallelLinearRS
-
+from fairscale.nn.model_parallel.mappings import (
+    gather_from_model_parallel_region,
+    reduce_from_model_parallel_region,
+)
 
 try:
     from yunchang import UlyssesAttention
@@ -256,12 +259,17 @@ class Attention(nn.Module):
 
         # NOTE(TP-SP) allgather input tensor
         # TODO(jiarui) implenent with torch Function
-        tp_pg = fs_init.get_model_parallel_group()
-        tp_degree = tp_pg.size()
-        local_rank = fs_init.get_model_parallel_rank()
-        tensor_list = [torch.empty_like(x) for _ in range(tp_degree)]
-        dist.all_gather(tensor_list, x, group=tp_pg)
-        x = torch.cat(tensor_list, dim=1)
+        # tp_pg = fs_init.get_model_parallel_group()
+        # tp_degree = tp_pg.size()
+        # local_rank = fs_init.get_model_parallel_rank()
+        # tensor_list = [torch.empty_like(x) for _ in range(tp_degree)]
+        # dist.all_gather(tensor_list, x, group=tp_pg)
+        # x = torch.cat(tensor_list, dim=1)
+        bsz, seqlen, h = x.shape
+        assert bsz == 1, f"Batch size {bsz} must be 1 for SP Attention"
+        x = x.view(bsz * seqlen, h)
+        x = gather_from_model_parallel_region(x)
+        x = x.view(bsz, -1, h)
 
         bsz, seqlen, _ = x.shape
 
@@ -485,9 +493,7 @@ class SPTransformer(nn.Module):
         self.n_layers = model_args.n_layers
         self.model_dim = model_args.dim
 
-        self.tok_embeddings = ParallelEmbedding(model_args.vocab_size, model_args.dim)
-
-        # self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
+        self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
         self.register_buffer(
             "freqs_cis",
             precompute_freqs_cis(
@@ -503,10 +509,7 @@ class SPTransformer(nn.Module):
 
         self.norm = RMSNorm(dim=model_args.dim, eps=model_args.norm_eps)
 
-        # self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
-        self.output = ColumnParallelLinear(
-            model_args.dim, model_args.vocab_size, bias=False, init_method=lambda x: x
-        )
+        self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
         self.init_weights()
 
     def init_weights(self):
@@ -560,16 +563,17 @@ class SPTransformer(nn.Module):
         tp_pg = fs_init.get_model_parallel_group()
         tp_degree = tp_pg.size()
         local_rank = fs_init.get_model_parallel_rank()
-        h = h.chunk(tp_degree, dim=1)[local_rank]
 
         self.freqs_cis = self.freqs_cis.to(h.device)
-        freqs_cis = self.freqs_cis[0:seqlen]
+        freqs_cis = self.freqs_cis[0 : seqlen * tp_degree]
 
         for layer in self.layers:
             h = layer(h, freqs_cis)
         h = self.norm(h)
         output = self.output(h).float()
-        return output
+
+        output = torch.sum(output, dim=1)
+        return reduce_from_model_parallel_region(output)
 
     @classmethod
     def from_model_args(cls, model_args: SPModelArgs) -> "SPTransformer":

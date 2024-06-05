@@ -13,6 +13,10 @@ try:
 except ImportError:
     print("yunchang not found")
 import fairscale.nn.model_parallel.initialize as fs_init
+from fairscale.nn.model_parallel.mappings import (
+    gather_from_model_parallel_region,
+    reduce_from_model_parallel_region,
+)
 
 
 @dataclass
@@ -458,9 +462,12 @@ class UlyssesSPTransformer(nn.Module):
         for layer in self.layers:
             h = layer(h, freqs_cis)
         h = self.norm(h)
-        output = self.output(h).float()
 
-        return output
+        # fetch the last token
+        output = self.output(h).float()
+        output = torch.sum(output, dim=1)
+
+        return reduce_from_model_parallel_region(output)
 
     @classmethod
     def from_model_args(cls, model_args: UlyssesSPModelArgs) -> "UlyssesSPTransformer":
