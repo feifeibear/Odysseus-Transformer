@@ -30,7 +30,7 @@ When the sequence length $L$ exceeds the intermediate hidden size $i$ ($L$ > i),
 ### Usage
 1. Install requirements.txt
 2. Install [feifeibear/long-context-attention](https://github.com/feifeibear/long-context-attention)
-3. bash run_example.sh
+3. bash run.sh
 
 ### TODO:
 The repo is work in progress.
@@ -40,6 +40,3 @@ The repo is work in progress.
 2. Integrate Odysseus with Ring for hybrid parallelism.
 
 3. Now, the tesh code only support batch size=1. Hybriding with Data parallel is not considered.
-
-### Acknowledgements
-The repo is built on [pytorch/example](https://github.com/pytorch/examples).

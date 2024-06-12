@@ -1,3 +1,5 @@
+# copy from https://github.com/jzhang38/EasyContext/blob/main/easy_context/ulysses_attn/prepare_inputs.py
+
 import transformers
 from typing import List, Optional, Tuple, Union
 import warnings

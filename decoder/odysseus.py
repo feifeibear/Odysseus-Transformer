@@ -1,4 +1,4 @@
-from llama2_model_odysseus import allgather_bsz1
+from utils.comm import allgather_bsz1
 import transformers
 from typing import List, Optional, Tuple, Union
 import warnings
@@ -60,7 +60,13 @@ class NewLlamaFlashAttention2(LlamaFlashAttention2):
         self.n_local_heads = self.num_heads // self.model_parallel_size
         self.n_local_kv_heads = self.num_key_value_heads // self.model_parallel_size
 
-        keep_master_weight_for_test = True
+        # clear allocated memory
+        self.q_proj = None
+        self.k_proj = None
+        self.v_proj = None
+        self.o_proj = None
+
+        keep_master_weight_for_test = False
         self.q_proj = ColumnParallelLinear(
             self.hidden_size,
             self.num_heads * self.head_dim,
@@ -125,8 +131,6 @@ class NewLlamaFlashAttention2(LlamaFlashAttention2):
             )
 
         output_attentions = False
-
-        print(f"hiddens_states befor gather : {hidden_states.size()}")
         # local
         bsz, local_q_len, _ = hidden_states.size()
         assert bsz == 1, f"bsz: {bsz}"
@@ -214,7 +218,11 @@ class NewLlamaFlashAttention2(LlamaFlashAttention2):
         return attn_output, attn_weights, past_key_value
 
 
-def apply_udysseus_attn_patch_llama():
-    transformers.models.llama.modeling_llama.LlamaFlashAttention2 = (
-        NewLlamaFlashAttention2
-    )
+def apply_odysseus_attn_patch_llama(model):
+    for i in range(model.config.num_hidden_layers):
+        new_module = NewLlamaFlashAttention2(
+            model.config,
+            i,
+        ).to(model.dtype)
+        model.model.layers[i].self_attn = new_module
+    print("Applied Odysseus patch for LlamaFlashAttn")
