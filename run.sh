@@ -5,10 +5,10 @@ SEQLEN=49152
 GPU_NUM=8
 
 PARALLEL="odysseus"
-torchrun --nproc_per_node=$GPU_NUM train.py --model /mnt/shangchun/Llama-2-7b-hf --seq-length $SEQLEN --parallel_mode $PARALLEL
+torchrun --nproc_per_node=$GPU_NUM train.py --model /mnt/fjr/Llama-2-7b-hf --seq-length $SEQLEN --parallel_mode $PARALLEL
 
 PARALLEL="ulysses"
-torchrun --nproc_per_node=$GPU_NUM train.py --model /mnt/shangchun/Llama-2-7b-hf --seq-length $SEQLEN --parallel_mode $PARALLEL
+torchrun --nproc_per_node=$GPU_NUM train.py --model /mnt/fjr/Llama-2-7b-hf --seq-length $SEQLEN --parallel_mode $PARALLEL
 
 PARALLEL="tpsp"
-torchrun --nproc_per_node=$GPU_NUM train.py --model /mnt/shangchun/Llama-2-7b-hf --seq-length $SEQLEN --parallel_mode $PARALLEL
+torchrun --nproc_per_node=$GPU_NUM train.py --model /mnt/fjr/Llama-2-7b-hf --seq-length $SEQLEN --parallel_mode $PARALLEL
