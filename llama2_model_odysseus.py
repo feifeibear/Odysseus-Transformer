@@ -4,6 +4,7 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from utils.comm import allgather_bsz1
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -13,10 +14,11 @@ from fairscale.nn.model_parallel.layers import (
     RowParallelLinear,
 )
 import fairscale.nn.model_parallel.initialize as fs_init
-from fairscale_patch import RowParallelLinearRS
+from utils.fairscale_patch import RowParallelLinearRS
 from fairscale.nn.model_parallel.mappings import (
     gather_from_model_parallel_region,
     reduce_from_model_parallel_region,
+    scatter_to_model_parallel_region,
 )
 
 
@@ -82,15 +84,6 @@ def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     assert freqs_cis.shape == (x.shape[1], x.shape[-1])
     shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
     return freqs_cis.view(*shape)
-
-
-def _gether_bsz1(x):
-    bsz, seqlen, h = x.shape
-    assert bsz == 1, f"Batch size {bsz} must be 1 for SP Attention"
-    x = x.view(bsz * seqlen, h)
-    x = gather_from_model_parallel_region(x)
-    x = x.view(bsz, -1, h)
-    return x
 
 
 def apply_rotary_emb(
@@ -263,7 +256,7 @@ class Attention(nn.Module):
         """
 
         # NOTE(TP-SP) allgather input tensor
-        x = _gether_bsz1(x)
+        x = allgather_bsz1(x)
 
         bsz, seqlen, _ = x.shape
 
@@ -384,7 +377,7 @@ class FeedForward(nn.Module):
         )
 
     def forward(self, x):
-        x = _gether_bsz1(x)
+        x = allgather_bsz1(x)
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
 
     def init_weights(self, init_std: float):

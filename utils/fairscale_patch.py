@@ -68,7 +68,7 @@ def _reduce_scatter_along_first_dim(input_):
     output = torch.empty(dim_size, dtype=input_.dtype, device=input_.device)
     torch.distributed.reduce_scatter_tensor(output, input_.contiguous(), group=group)
 
-    output = output.unsqueeze_(0)
+    output = output.unsqueeze_(0).contiguous()
     assert output.dim() == 3
     return output
 
@@ -91,7 +91,7 @@ def _gather_along_first_dim(input_):
     output = torch.empty(dim_size, dtype=input_.dtype, device=input_.device)
     torch.distributed.all_gather_into_tensor(output, input_.contiguous(), group=group)
 
-    output = output.unsqueeze_(0)
+    output = output.unsqueeze_(0).contiguous()
     assert output.dim() == 3
     return output
 
@@ -112,8 +112,28 @@ class _ReduceScatterToSequenceParallelRegion(torch.autograd.Function):
         return _gather_along_first_dim(grad_output)
 
 
+class AllgatherToSequenceParallelRegion(torch.autograd.Function):
+    @staticmethod
+    def symbolic(graph, input_):
+        return _gather_along_first_dim(input_)
+
+    @staticmethod
+    def forward(ctx, input_):
+        return _gather_along_first_dim(input_)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return _reduce_scatter_along_first_dim(grad_output)
+
+
 def reducescatter_from_model_parallel_region(input_: torch.Tensor) -> torch.Tensor:
     return _ReduceScatterToSequenceParallelRegion.apply(input_)
+
+
+def allgather_along_first_dim_from_model_parallel_region(
+    input_: torch.Tensor,
+) -> torch.Tensor:
+    return AllgatherToSequenceParallelRegion.apply(input_)
 
 
 class RowParallelLinearRS(torch.nn.Module):
@@ -203,6 +223,7 @@ class RowParallelLinearRS(torch.nn.Module):
         # Matrix multiply.
         output_parallel = F.linear(input_parallel, self.weight)
         # All-reduce across all the partitions.
+        # output_parallel (bsz, seqlen, head_dim)
         output_ = reducescatter_from_model_parallel_region(output_parallel)
         if self.bias is not None:
             output = output_ + self.bias
