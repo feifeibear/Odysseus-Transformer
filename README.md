@@ -26,6 +26,7 @@ When the sequence length $L$ exceeds the intermediate hidden size $i$ ($L$ > i),
 | TP              | 2AllReduce | 4O(Ld)       | 0        | 0                        | full       | 1/N        |
 | TP-SP           | 4RS+4AG    | 4O(Ld)       | 0        | 0                        | 1/N        | 1/N        |
 | Ulysses+ZeRO3   | 4All2All   | 4O(Ld)       | AllReduce| 4O($d^2$)+2O(di)           | 1/N        | 1/N      |
+| Ring+ZeRO3      | async P2P  | 2O(Ld)       | AllReduce| 4O($d^2$)+2O(di)           | 1/N        | 1/N      |
 | Odysseus+ZeRO3  | 2RS+2AG    | 2O(Ld)       | AllReduce (MLP) | 2O(di) | 1/N        | 1/N        |
 
 ### Usage
