@@ -39,14 +39,14 @@ from utils.fairscale_patch import RowParallelLinearRS
 logger = logging.get_logger(__name__)
 
 
-class NewLlamaFlashAttention2(LlamaFlashAttention2):
+class LlamaFlashAttention2TPSP(LlamaFlashAttention2):
     """
     Llama flash attention module. This module inherits from `LlamaAttention` as the weights of the module stays
     untouched. The only required change would be on the forward pass where it needs to correctly call the public API of
     flash attention and deal with padding tokens in case the input contains any of them.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, keep_master_weight_for_test=False, **kwargs):
         super().__init__(*args, **kwargs)
 
         # TODO: Should be removed once Flash Attention for RoCm is bumped to 2.1.
@@ -66,7 +66,6 @@ class NewLlamaFlashAttention2(LlamaFlashAttention2):
         self.v_proj = None
         self.o_proj = None
 
-        keep_master_weight_for_test = False
         self.q_proj = ColumnParallelLinear(
             self.hidden_size,
             self.num_heads * self.head_dim,
@@ -220,7 +219,7 @@ class NewLlamaFlashAttention2(LlamaFlashAttention2):
 
 def apply_odysseus_attn_patch_llama(model):
     for i in range(model.config.num_hidden_layers):
-        new_module = NewLlamaFlashAttention2(
+        new_module = LlamaFlashAttention2TPSP(
             model.config,
             i,
         ).to(model.dtype)
