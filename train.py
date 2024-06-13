@@ -5,7 +5,7 @@ from transformers import set_seed
 from transformers import AutoModelForCausalLM
 import transformers
 from flash_attn.losses.cross_entropy import CrossEntropyLoss
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, CPUOffload
 from fairscale.nn.model_parallel.initialize import (
     get_model_parallel_rank,
     initialize_model_parallel,
@@ -68,6 +68,9 @@ def main(args):
             model = FSDP(
                 model,
                 process_group=tp_pg,
+                cpu_offload=(
+                    CPUOffload(offload_params=True) if args.cpu_offload else None
+                ),
             )
         elif args.parallel_mode == "odysseus":
             ignored_modules = []
@@ -78,6 +81,9 @@ def main(args):
                 model,
                 ignored_modules=ignored_modules,
                 process_group=tp_pg,
+                cpu_offload=(
+                    CPUOffload(offload_params=True) if args.cpu_offload else None
+                ),
             )
         elif args.parallel_mode == "tpsp":
             ignored_modules = []
@@ -89,8 +95,12 @@ def main(args):
                 model,
                 ignored_modules=ignored_modules,
                 process_group=tp_pg,
+                cpu_offload=(
+                    CPUOffload(offload_params=True) if args.cpu_offload else None
+                ),
             )
-
+    if args.grad_checkpoint:
+        model.gradient_checkpointing_enable()
     # if rank == 0:
     #     for name, child in model.named_children():
     #         print(name, child)
@@ -170,6 +180,8 @@ if __name__ == "__main__":
     args.add_argument("--rope-theta", type=float, default=100000)
     args.add_argument("--model", type=str, default="meta-llama/Llama-2-7b-hf")
     args.add_argument("--seq-length", type=int, default=16384)
+    args.add_argument("--cpu-offload", action="store_true", default=False)
+    args.add_argument("--grad-checkpoint", action="store_true", default=False)
     args.add_argument(
         "--parallel_mode",
         type=str,
