@@ -17,6 +17,7 @@ import numpy as np
 from decoder.odysseus import apply_odysseus_attn_patch_llama
 from decoder.ulysses import apply_ulysses_attn_monkey_patch_llama
 from decoder.tensor_parallel import apply_tpsp_attn_patch_llama
+from decoder.ring import apply_zigzag_ring_attn_patch_llama
 from utils.apply_seq_parallel import prepare_attn_inputs
 
 
@@ -51,12 +52,14 @@ def main(args):
         apply_ulysses_attn_monkey_patch_llama()
     elif args.parallel_mode == "tpsp":
         apply_tpsp_attn_patch_llama(model)
+    elif args.parallel_mode == "ring":
+        apply_zigzag_ring_attn_patch_llama()
 
     model = model.to(dev)
 
     if rank == 0:
         print(
-            f"{args.parallel_mode} After init model, CUDA memory allocated: {torch.cuda.memory_allocated(dev) / 1024 ** 3} GB, reserved: {torch.cuda.memory_reserved(dev) / 1024 ** 3} GB"
+            f"{args.parallel_mode} After init model, CUDA memory allocated: {torch.cuda.memory_allocated(dev) / 1024 ** 3:.2f} GB, reserved: {torch.cuda.memory_reserved(dev) / 1024 ** 3:.2f} GB"
         )
 
     assert isinstance(
@@ -64,7 +67,11 @@ def main(args):
     ), "Only support llama model"
 
     if world_size > 1:
-        if args.parallel_mode == "ulysses" and args.parallel_mode == "dp":
+        if (
+            args.parallel_mode == "ulysses"
+            and args.parallel_mode == "dp"
+            and args.parallel_mode == "ring"
+        ):
             model = FSDP(
                 model,
                 process_group=tp_pg,
@@ -117,7 +124,7 @@ def main(args):
 
     if rank == 0:
         print(
-            f"{args.parallel_mode} After init optim, CUDA memory allocated: {torch.cuda.memory_allocated(dev) / 1024 ** 3} GB, reserved: {torch.cuda.memory_reserved(dev) / 1024 ** 3} GB"
+            f"{args.parallel_mode} After init optim, CUDA memory allocated: {torch.cuda.memory_allocated(dev) / 1024 ** 3:.2f} GB, reserved: {torch.cuda.memory_reserved(dev) / 1024 ** 3:.2f} GB"
         )
     for step in range(args.max_train_steps):
         if step > warmup_num_iterations:
@@ -152,7 +159,7 @@ def main(args):
         )
         if rank == 0:
             print(
-                f"step {step} CUDA memory allocated: {torch.cuda.memory_allocated(dev) / 1024 ** 3} GB, CUDA memory reserved: {torch.cuda.memory_reserved(dev) / 1024 ** 3} MB"
+                f"step {step} CUDA memory allocated: {torch.cuda.memory_allocated(dev) / 1024 ** 3:.2f} GB, CUDA memory reserved: {torch.cuda.memory_reserved(dev) / 1024 ** 3:.2f} GB"
             )
             print(f"loss {loss.item()}")
         loss.backward(loss)
@@ -185,6 +192,6 @@ if __name__ == "__main__":
     args.add_argument(
         "--parallel_mode",
         type=str,
-        choices=["odysseus", "ulysses", "dp", "tpsp"],
+        choices=["odysseus", "ulysses", "dp", "tpsp", "ring"],
     )
     main(args.parse_args())

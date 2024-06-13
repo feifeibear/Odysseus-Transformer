@@ -2,8 +2,9 @@
 
 This repository delves into the optimal parallelization strategies for long-sequence LLMs, implementing three methods: 
 1. [Tensor Parallelism with Sequence Parallelism (TP-SP)](https://arxiv.org/abs/2205.05198), refer to MLSys 23' paper: Reducing Activation Recomputation in Large Transformer Models.
-2. [DeepSpeed-Ulysses](https://arxiv.org/abs/2309.14509), refer to the paper: DeepSpeed Ulysses: System Optimizations for Enabling Training of Extreme Long Sequence Transformer Models.
-3. Odysseus. A novel method is proposed in this repo.
+2. [DeepSpeed-Ulysses](https://arxiv.org/abs/2309.14509), refer to the paper: DeepSpeed Ulysses: System Optimizations for Enabling Training of Extreme Long Sequence Transformer Models. Apply the implementation from [feifeibear/long-context-attention](https://github.com/feifeibear/long-context-attention).
+3. [Ring-Attentions](https://arxiv.org/abs/2310.01889), refer to the paper: Ring Attention with Blockwise Transformers for Near-Infinite Context. Apply the implementation from [zhuzilin/ring-flash-attention](https://github.com/zhuzilin/ring-flash-attention)
+4. Odysseus. A novel method is proposed in this repo.
 
 As you can see, we involve both tensor parallelism and sequence parallelism here.
 The commonality among these methods is that they all require partitioning along the head number dimension, thus the degree of parallelism is constrained by the head number. We have excluded Ring-Attention as it can be used orthogonally with these three methods.
@@ -34,8 +35,12 @@ When the sequence length $L$ exceeds the intermediate hidden size $i$ ($L$ > i),
 ### TODO:
 The repo is still work in progress.
 
-1. Our TP-SP implementation stores the full shape tensor after allgather in GPU memory before the backward pass, resulting in an Activation memory cost greater than 1/N. Our implementation does not strictly adhere to the paper.
+1. Our TP-SP implementation stores the full shape tensor after allgather in GPU memory before the backward pass, resulting in an Activation memory cost greater than 1/N. Our implementation does not strictly adhere to the paper. Gradient checkpointing should be developped for TP-SP.
 
 2. Integrate Odysseus with Ring for hybrid parallelism.
 
 3. Now, the tesh code only support batch size=1. Hybriding with Data parallel is not considered.
+
+### Acknowledgement
+
+[jzhang38/EasyContext](https://github.com/jzhang38/EasyContext)
