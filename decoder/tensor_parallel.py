@@ -66,8 +66,7 @@ class NewLlamaMLP(nn.Module):
             down_proj = sum(down_proj)
         else:
             x = allgather_bsz1(x)
-            a = self.act_fn(self.w1(x)) * self.w3(x)
-            return self.w2(a)
+            return self.w2(self.act_fn(self.w1(x)) * self.w3(x))
 
 
 def apply_tpsp_attn_patch_llama(model):

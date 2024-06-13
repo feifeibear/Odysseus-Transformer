@@ -105,6 +105,10 @@ def main(args):
     warmup_num_iterations = 2
     elapse = 0.0
 
+    if rank == 0:
+        print(
+            f"{args.parallel_mode} After init optim, CUDA memory allocated: {torch.cuda.memory_allocated(dev) / 1024 ** 3} GB, reserved: {torch.cuda.memory_reserved(dev) / 1024 ** 3} GB"
+        )
     for step in range(args.max_train_steps):
         if step > warmup_num_iterations:
             start_time = time.time()
