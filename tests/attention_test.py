@@ -42,7 +42,11 @@ def compare_forward_results():
     config = LlamaConfig(
         hidden_size=hidden_size, num_attention_heads=32, num_key_value_heads=8
     )
-    model1 = LlamaFlashAttention2TPSP(config).to(dtype).to(dist.get_rank())
+    model1 = (
+        LlamaFlashAttention2TPSP(config, keep_master_weight_for_test=True)
+        .to(dtype)
+        .to(dist.get_rank())
+    )
     model2 = LlamaFlashAttention2(config).to(dtype).to(dist.get_rank())
 
     def copy_weight(t1, t2):

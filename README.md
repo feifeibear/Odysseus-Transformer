@@ -24,24 +24,22 @@ When the sequence length $L$ exceeds the intermediate hidden size $i$ ($L$ > i),
 | Method          | Comm Activation | Comm Volume       | Comm Gradient | Comm Volume                   | Mem Activation | Mem Param/Grad |
 |-----------------|------------|--------------|----------|--------------------------|------------|------------|
 | TP              | 2AllReduce | 4O(Ld)       | 0        | 0                        | full       | 1/N        |
-| TP-SP           | 4RS+4AG    | 4O(Ld)       | 0        | 0                        | 1/N        | 1/N        |
+| TP-SP           | 6RS+4AG    | 4O(Ld)       | 0        | 0                        | 1/N        | 1/N        |
 | Ulysses+ZeRO3   | 4All2All   | 4O(Ld)       | AllReduce| 4O($d^2$)+2O(di)           | 1/N        | 1/N      |
-| Ring+ZeRO3      | async P2P  | 2O(Ld)       | AllReduce| 4O($d^2$)+2O(di)           | 1/N        | 1/N      |
-| Odysseus+ZeRO3  | 2RS+2AG    | 2O(Ld)       | AllReduce (MLP) | 2O(di) | 1/N        | 1/N        |
+| Ring+ZeRO3      | P2P        | 2O(Ld)       | AllReduce| 4O($d^2$)+2O(di)           | 1/N        | 1/N      |
+| Odysseus+ZeRO3  | 3RS+2AG    | 2O(Ld)       | AllReduce (MLP) | 2O(di) | 1/N        | 1/N        |
 
 ### Usage
 1. Install requirements.txt
-2. Install [feifeibear/long-context-attention](https://github.com/feifeibear/long-context-attention)
+2. Install [feifeibear/long-context-attention](https://github.com/feifeibear/long-context-attention), and [zhuzilin/ring-flash-attention](https://github.com/zhuzilin/ring-flash-attention).
 3. bash run.sh
 
 ### TODO:
 The repo is still work in progress.
 
-1. Our TP-SP implementation stores the full shape tensor after allgather in GPU memory before the backward pass, resulting in an Activation memory cost greater than 1/N. Our implementation does not strictly adhere to the paper. Gradient checkpointing should be developped for TP-SP.
-
-2. Integrate Odysseus with Ring for hybrid parallelism.
-
-3. Now, the tesh code only support batch size=1. Hybriding with Data parallel is not considered.
+1. Odysseus and Ring for hybrid parallelism.
+2. Now, the tesh code only support batch size=1. Hybriding parallelism with Data parallel is not considered.
+3. TP-SP conflicts with gradient checkpointing.
 
 ### Acknowledgements
 

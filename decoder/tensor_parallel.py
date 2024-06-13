@@ -1,5 +1,5 @@
 from decoder.odysseus import LlamaFlashAttention2TPSP
-from utils.fairscale_patch import RowParallelLinearRS
+from utils.fairscale_patch import ColumnParallelLinearAG, RowParallelLinearRS
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -12,7 +12,7 @@ from utils.comm import allgather_bsz1
 
 
 class LlamaMLPTPSP(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, pack_weight: bool = True):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -21,49 +21,43 @@ class LlamaMLPTPSP(nn.Module):
 
         # TODO(jiarui) use_bias = config.mlp_bias
         use_bias = False
+        self.pack_weight = pack_weight
 
-        self.w1 = ColumnParallelLinear(
-            self.hidden_size, self.intermediate_size, bias=use_bias, gather_output=False
-        )
+        if self.pack_weight:
+            self.w1w3 = ColumnParallelLinearAG(
+                self.hidden_size,
+                self.intermediate_size * 2,
+                bias=use_bias,
+                gather_output=False,
+            )
+        else:
+            self.w1 = ColumnParallelLinear(
+                self.hidden_size,
+                self.intermediate_size,
+                bias=use_bias,
+                gather_output=False,
+            )
+            self.w3 = ColumnParallelLinear(
+                self.hidden_size,
+                self.intermediate_size,
+                bias=use_bias,
+                gather_output=False,
+            )
         self.w2 = RowParallelLinearRS(
             self.intermediate_size,
             self.hidden_size,
             bias=use_bias,
             input_is_parallel=True,
         )
-        self.w3 = ColumnParallelLinear(
-            self.hidden_size, self.intermediate_size, bias=use_bias, gather_output=False
-        )
 
     def forward(self, x):
-        if self.config.pretraining_tp > 1:
-            raise NotImplementedError("Pretraining TP is not supported for LlamaMLP")
-            slice = self.intermediate_size // self.config.pretraining_tp
-            gate_proj_slices = self.gate_proj.weight.split(slice, dim=0)
-            up_proj_slices = self.up_proj.weight.split(slice, dim=0)
-            down_proj_slices = self.down_proj.weight.split(slice, dim=1)
-
-            gate_proj = torch.cat(
-                [
-                    F.linear(x, gate_proj_slices[i])
-                    for i in range(self.config.pretraining_tp)
-                ],
-                dim=-1,
-            )
-            up_proj = torch.cat(
-                [
-                    F.linear(x, up_proj_slices[i])
-                    for i in range(self.config.pretraining_tp)
-                ],
-                dim=-1,
-            )
-
-            intermediate_states = (self.act_fn(gate_proj) * up_proj).split(slice, dim=2)
-            down_proj = [
-                F.linear(intermediate_states[i], down_proj_slices[i])
-                for i in range(self.config.pretraining_tp)
-            ]
-            down_proj = sum(down_proj)
+        assert (
+            self.config.pretraining_tp <= 1
+        ), "Pretraining TP is not supported for LlamaMLP"
+        if self.pack_weight:
+            x_packed = self.w1w3(x)
+            a, b = x_packed.chunk(2, dim=-1)
+            return self.w2(self.act_fn(a * b))
         else:
             x = allgather_bsz1(x)
             return self.w2(self.act_fn(self.w1(x)) * self.w3(x))
