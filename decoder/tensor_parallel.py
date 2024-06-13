@@ -1,4 +1,4 @@
-from decoder.odysseus import NewLlamaFlashAttention2
+from decoder.odysseus import LlamaFlashAttention2TPSP
 from utils.fairscale_patch import RowParallelLinearRS
 import torch
 import torch.nn.functional as F
@@ -11,7 +11,7 @@ from transformers.activations import ACT2FN
 from utils.comm import allgather_bsz1
 
 
-class NewLlamaMLP(nn.Module):
+class LlamaMLPTPSP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -71,11 +71,11 @@ class NewLlamaMLP(nn.Module):
 
 def apply_tpsp_attn_patch_llama(model):
     for i in range(model.config.num_hidden_layers):
-        new_attn = NewLlamaFlashAttention2(
+        new_attn = LlamaFlashAttention2TPSP(
             model.config,
             i,
         ).to(model.dtype)
-        new_mlp = NewLlamaMLP(model.config).to(model.dtype)
+        new_mlp = LlamaMLPTPSP(model.config).to(model.dtype)
         model.model.layers[i].self_attn = new_attn
         model.model.layers[i].mlp = new_mlp
     print("Applied TP-SP patch for LlamaFlashAttn")

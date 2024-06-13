@@ -1,6 +1,6 @@
 ## Odysseus: Upgrade DeepSpeed-Ulysses by Decoupling the Parallel Strategies of Attention and MLP
 
-This repository delves into the optimal parallelization strategies for long-sequence LLMs, implementing four methods: 
+This repository delves into the optimal parallelization strategies for long-sequence LLMs, implementing three methods: 
 1. [Tensor Parallelism with Sequence Parallelism (TP-SP)](https://arxiv.org/abs/2205.05198), refer to MLSys 23' paper: Reducing Activation Recomputation in Large Transformer Models.
 2. [DeepSpeed-Ulysses](https://arxiv.org/abs/2309.14509), refer to the paper: DeepSpeed Ulysses: System Optimizations for Enabling Training of Extreme Long Sequence Transformer Models.
 3. Odysseus. A novel method is proposed in this repo.

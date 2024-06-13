@@ -1,7 +1,7 @@
 # test.py
 import torch
 import torch.distributed as dist
-from decoder.odysseus import NewLlamaFlashAttention2, LlamaFlashAttention2
+from decoder.odysseus import LlamaFlashAttention2TPSP, LlamaFlashAttention2
 from fairscale.nn.model_parallel.initialize import (
     get_model_parallel_rank,
     initialize_model_parallel,
@@ -42,7 +42,7 @@ def compare_forward_results():
     config = LlamaConfig(
         hidden_size=hidden_size, num_attention_heads=32, num_key_value_heads=8
     )
-    model1 = NewLlamaFlashAttention2(config).to(dtype).to(dist.get_rank())
+    model1 = LlamaFlashAttention2TPSP(config).to(dtype).to(dist.get_rank())
     model2 = LlamaFlashAttention2(config).to(dtype).to(dist.get_rank())
 
     def copy_weight(t1, t2):

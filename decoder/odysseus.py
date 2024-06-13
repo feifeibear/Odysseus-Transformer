@@ -39,7 +39,7 @@ from utils.fairscale_patch import RowParallelLinearRS
 logger = logging.get_logger(__name__)
 
 
-class NewLlamaFlashAttention2(LlamaFlashAttention2):
+class LlamaFlashAttention2TPSP(LlamaFlashAttention2):
     """
     Llama flash attention module. This module inherits from `LlamaAttention` as the weights of the module stays
     untouched. The only required change would be on the forward pass where it needs to correctly call the public API of
@@ -219,7 +219,7 @@ class NewLlamaFlashAttention2(LlamaFlashAttention2):
 
 def apply_odysseus_attn_patch_llama(model):
     for i in range(model.config.num_hidden_layers):
-        new_module = NewLlamaFlashAttention2(
+        new_module = LlamaFlashAttention2TPSP(
             model.config,
             i,
         ).to(model.dtype)
