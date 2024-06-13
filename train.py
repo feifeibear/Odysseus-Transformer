@@ -1,4 +1,5 @@
 import argparse
+from utils.globals import _set_global_memory_buffer
 import torch
 import os
 from transformers import set_seed
@@ -35,8 +36,9 @@ def main(args):
     tp_pg = get_model_parallel_group()
 
     set_seed(args.seed)
-
     dev = torch.device(f"cuda:{local_rank}")
+    _set_global_memory_buffer(dev)
+
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
         device_map="cpu",
@@ -44,6 +46,7 @@ def main(args):
         rope_theta=args.rope_theta,
         _attn_implementation="flash_attention_2",
         do_sample=True,  # fix warning
+        # use_cache=False, # use gradient checkpointing
     )
 
     if args.parallel_mode == "odysseus":
@@ -69,8 +72,8 @@ def main(args):
     if world_size > 1:
         if (
             args.parallel_mode == "ulysses"
-            and args.parallel_mode == "dp"
-            and args.parallel_mode == "ring"
+            or args.parallel_mode == "dp"
+            or args.parallel_mode == "ring"
         ):
             model = FSDP(
                 model,

@@ -34,7 +34,7 @@ from fairscale.nn.model_parallel.layers import (
     ColumnParallelLinear,
     RowParallelLinear,
 )
-from utils.fairscale_patch import RowParallelLinearRS
+from utils.fairscale_patch import ColumnParallelLinearAG, RowParallelLinearRS
 
 logger = logging.get_logger(__name__)
 
@@ -46,7 +46,20 @@ class LlamaFlashAttention2TPSP(LlamaFlashAttention2):
     flash attention and deal with padding tokens in case the input contains any of them.
     """
 
-    def __init__(self, *args, keep_master_weight_for_test=False, **kwargs):
+    def __init__(
+        self,
+        *args,
+        keep_master_weight_for_test=False,
+        pack_weight=True,
+        sequence_parallel=True,
+        **kwargs,
+    ):
+        """
+        Args:
+            keep_master_weight_for_test (bool, optional): keep the replicated weight for debug. Defaults to False.
+            pack_weight (bool, optional): Q,K,V Linear weights are packed togather as a single weight. Defaults to True.
+            sequence_parallel (bool, optional): use sequence parallel Column Linear, which does not save the full shape input activation. Defaults to True.
+        """
         super().__init__(*args, **kwargs)
 
         # TODO: Should be removed once Flash Attention for RoCm is bumped to 2.1.
@@ -66,44 +79,64 @@ class LlamaFlashAttention2TPSP(LlamaFlashAttention2):
         self.v_proj = None
         self.o_proj = None
 
-        self.q_proj = ColumnParallelLinear(
-            self.hidden_size,
-            self.num_heads * self.head_dim,
-            bias=False,
-            gather_output=False,
-            keep_master_weight_for_test=keep_master_weight_for_test,
-        )
+        self.pack_weight = pack_weight
+        self.sequence_parallel = sequence_parallel
+        if self.pack_weight:
+            if self.sequence_parallel:
+                self.qkv_proj = ColumnParallelLinearAG(
+                    self.hidden_size,
+                    (self.num_heads + 2 * self.num_key_value_heads) * self.head_dim,
+                    bias=False,
+                    gather_output=False,
+                    keep_master_weight_for_test=keep_master_weight_for_test,
+                )
+            else:
+                self.qkv_proj = ColumnParallelLinear(
+                    self.hidden_size,
+                    (self.num_heads + 2 * self.num_key_value_heads) * self.head_dim,
+                    bias=False,
+                    gather_output=False,
+                    keep_master_weight_for_test=keep_master_weight_for_test,
+                )
+        else:
+            self.q_proj = ColumnParallelLinear(
+                self.hidden_size,
+                self.num_heads * self.head_dim,
+                bias=False,
+                gather_output=False,
+                keep_master_weight_for_test=keep_master_weight_for_test,
+            )
 
-        # self.wq.weight.copy(self.q_proj.weight.chunk(self.model_parallel_size, dim=1)[self.local_rank])
-        # if self.wq.bias:
-        #     self.wq.bias.copy(self.q_proj.bias.chunk(self.model_parallel_size, dim=1)[self.local_rank])
-        # del self.q_proj
+            # self.wq.weight.copy(self.q_proj.weight.chunk(self.model_parallel_size, dim=1)[self.local_rank])
+            # if self.wq.bias:
+            #     self.wq.bias.copy(self.q_proj.bias.chunk(self.model_parallel_size, dim=1)[self.local_rank])
+            # del self.q_proj
 
-        self.k_proj = ColumnParallelLinear(
-            self.hidden_size,
-            self.num_key_value_heads * self.head_dim,
-            bias=False,
-            gather_output=False,
-            keep_master_weight_for_test=keep_master_weight_for_test,
-        )
+            self.k_proj = ColumnParallelLinear(
+                self.hidden_size,
+                self.num_key_value_heads * self.head_dim,
+                bias=False,
+                gather_output=False,
+                keep_master_weight_for_test=keep_master_weight_for_test,
+            )
 
-        # self.wk.weight.copy(self.k_proj.weight.chunk(self.model_parallel_size, dim=1)[self.local_rank])
-        # if self.wk.bias:
-        #     self.wk.bias.copy(self.k_proj.bias.chunk(self.model_parallel_size, dim=1)[self.local_rank])
-        # del self.k_proj
+            # self.wk.weight.copy(self.k_proj.weight.chunk(self.model_parallel_size, dim=1)[self.local_rank])
+            # if self.wk.bias:
+            #     self.wk.bias.copy(self.k_proj.bias.chunk(self.model_parallel_size, dim=1)[self.local_rank])
+            # del self.k_proj
 
-        self.v_proj = ColumnParallelLinear(
-            self.hidden_size,
-            self.num_key_value_heads * self.head_dim,
-            bias=False,
-            gather_output=False,
-            keep_master_weight_for_test=keep_master_weight_for_test,
-        )
+            self.v_proj = ColumnParallelLinear(
+                self.hidden_size,
+                self.num_key_value_heads * self.head_dim,
+                bias=False,
+                gather_output=False,
+                keep_master_weight_for_test=keep_master_weight_for_test,
+            )
 
-        # self.wv.weight.copy(self.v_proj.weight.chunk(self.model_parallel_size, dim=1)[self.local_rank])
-        # if self.wv.bias:
-        #     self.wv.bias.copy(self.v_proj.bias.chunk(self.model_parallel_size, dim=1)[self.local_rank])
-        # del self.v_proj
+            # self.wv.weight.copy(self.v_proj.weight.chunk(self.model_parallel_size, dim=1)[self.local_rank])
+            # if self.wv.bias:
+            #     self.wv.bias.copy(self.v_proj.bias.chunk(self.model_parallel_size, dim=1)[self.local_rank])
+            # del self.v_proj
 
         self.o_proj = RowParallelLinearRS(
             self.hidden_size,
@@ -133,12 +166,30 @@ class LlamaFlashAttention2TPSP(LlamaFlashAttention2):
         # local
         bsz, local_q_len, _ = hidden_states.size()
         assert bsz == 1, f"bsz: {bsz}"
-        hidden_states = allgather_bsz1(hidden_states)
-        bsz, q_len, _ = hidden_states.size()
 
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
-        value_states = self.v_proj(hidden_states)
+        if self.pack_weight:
+            world_size = fs_init.get_model_parallel_world_size()
+            q_len = local_q_len * world_size
+
+            if not self.sequence_parallel:
+                hidden_states = allgather_bsz1(hidden_states)
+
+            qkv_states = self.qkv_proj(hidden_states).view(
+                bsz, q_len, -1, self.head_dim
+            )
+            query_states = qkv_states[:, :, : self.n_local_heads, :]
+            key_states = qkv_states[
+                :, :, self.n_local_heads : self.n_local_heads + self.n_local_kv_heads, :
+            ]
+            value_states = qkv_states[
+                :, :, self.n_local_heads + self.n_local_kv_heads :, :
+            ]
+        else:
+            hidden_states = allgather_bsz1(hidden_states)
+            bsz, q_len, _ = hidden_states.size()
+            query_states = self.q_proj(hidden_states)
+            key_states = self.k_proj(hidden_states)
+            value_states = self.v_proj(hidden_states)
 
         # Flash attention requires the input to have the shape
         # batch_size x seq_length x head_dim x hidden_dim
