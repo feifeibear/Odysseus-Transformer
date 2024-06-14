@@ -1,4 +1,5 @@
 # test.py
+from utils.globals import _set_global_memory_buffer
 import torch
 import torch.distributed as dist
 from decoder.odysseus import LlamaFlashAttention2TPSP, LlamaFlashAttention2
@@ -36,14 +37,13 @@ def compare_forward_results():
         .repeat(bsz, 1)
         .to(dist.get_rank())
     )
-
-    # position_ids_2 = position_ids_1.chunk(_world_size, dim = 1)[get_model_parallel_rank()]
-
     config = LlamaConfig(
         hidden_size=hidden_size, num_attention_heads=32, num_key_value_heads=8
     )
     model1 = (
-        LlamaFlashAttention2TPSP(config, keep_master_weight_for_test=True)
+        LlamaFlashAttention2TPSP(
+            config, keep_master_weight_for_test=True, pack_weight=False
+        )
         .to(dtype)
         .to(dist.get_rank())
     )

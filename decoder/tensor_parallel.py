@@ -12,7 +12,7 @@ from utils.comm import allgather_bsz1
 
 
 class LlamaMLPTPSP(nn.Module):
-    def __init__(self, config, pack_weight: bool = True):
+    def __init__(self, config, pack_weight: bool = True, sequence_parallel=True):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -22,14 +22,23 @@ class LlamaMLPTPSP(nn.Module):
         # TODO(jiarui) use_bias = config.mlp_bias
         use_bias = False
         self.pack_weight = pack_weight
+        self.sequence_parallel = sequence_parallel
 
         if self.pack_weight:
-            self.w1w3 = ColumnParallelLinearAG(
-                self.hidden_size,
-                self.intermediate_size * 2,
-                bias=use_bias,
-                gather_output=False,
-            )
+            if sequence_parallel:
+                self.w1w3 = ColumnParallelLinearAG(
+                    self.hidden_size,
+                    self.intermediate_size * 2,
+                    bias=use_bias,
+                    gather_output=False,
+                )
+            else:
+                self.w1w3 = ColumnParallelLinear(
+                    self.hidden_size,
+                    self.intermediate_size * 2,
+                    bias=use_bias,
+                    gather_output=False,
+                )
         else:
             self.w1 = ColumnParallelLinear(
                 self.hidden_size,
@@ -55,9 +64,11 @@ class LlamaMLPTPSP(nn.Module):
             self.config.pretraining_tp <= 1
         ), "Pretraining TP is not supported for LlamaMLP"
         if self.pack_weight:
+            if not self.sequence_parallel:
+                x = allgather_bsz1(x)
             x_packed = self.w1w3(x)
-            a, b = x_packed.chunk(2, dim=-1)
-            return self.w2(self.act_fn(a * b))
+            a1, a3 = x_packed.chunk(2, dim=-1)
+            return self.w2(self.act_fn(a1) * a3)
         else:
             x = allgather_bsz1(x)
             return self.w2(self.act_fn(self.w1(x)) * self.w3(x))
