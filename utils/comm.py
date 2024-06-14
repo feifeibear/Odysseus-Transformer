@@ -1,4 +1,4 @@
-from .fairscale_patch import allgather_along_first_dim_from_model_parallel_region
+from .linear import allgather_along_first_dim_from_model_parallel_region
 
 
 def allgather_bsz1(x):
