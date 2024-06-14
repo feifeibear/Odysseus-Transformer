@@ -34,7 +34,7 @@ from fairscale.nn.model_parallel.layers import (
     ColumnParallelLinear,
     RowParallelLinear,
 )
-from utils.fairscale_patch import ColumnParallelLinearAG, RowParallelLinearRS
+from utils.linear import ColumnParallelLinearAG, RowParallelLinearRS
 
 logger = logging.get_logger(__name__)
 

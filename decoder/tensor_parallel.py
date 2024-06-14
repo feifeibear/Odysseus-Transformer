@@ -1,5 +1,5 @@
 from decoder.odysseus import LlamaFlashAttention2TPSP
-from utils.fairscale_patch import ColumnParallelLinearAG, RowParallelLinearRS
+from utils.linear import ColumnParallelLinearAG, RowParallelLinearRS
 import torch
 import torch.nn.functional as F
 from torch import nn
