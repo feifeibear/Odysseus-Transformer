@@ -25,8 +25,13 @@ def test_LlamaMLPTPSP():
 
     config = LlamaConfig(hidden_size=hidden_size, intermediate_size=intermediate_size)
     input_tensor = torch.randn(1, seqlen, hidden_size, dtype=torch.bfloat16).to(dev)
+    output_grad = torch.randn(1, seqlen, hidden_size, dtype=torch.bfloat16).to(dev)
 
-    model1 = LlamaMLPTPSP(config, pack_weight=True).to(torch.bfloat16).to(dev)
+    model1 = (
+        LlamaMLPTPSP(config, pack_weight=True, sequence_parallel=True)
+        .to(torch.bfloat16)
+        .to(dev)
+    )
     output1 = model1(input_tensor)
 
     model2 = LlamaMLPTPSP(config, pack_weight=False).to(torch.bfloat16).to(dev)
@@ -45,8 +50,16 @@ def test_LlamaMLPTPSP():
     model3.w1w3.weight.data.copy_(model1.w1w3.weight.data)
     output3 = model3(input_tensor)
 
-    print(output1 - output3)
-    # testing.assert_allclose(output1, output2, rtol=1e-1)
+    output1.backward(output_grad)
+    output3.backward(output_grad)
+
+    # print(output1 - output2)
+    # print(model1.w1w3.weight.grad - model3.w1w3.weight.grad)
+
+    assert torch.allclose(model1.w1w3.weight.grad, model3.w1w3.weight.grad, rtol=1e-3)
+    assert torch.allclose(output1, output3, rtol=1e-3)
+
+    assert torch.allclose(output1, output2, rtol=1e-3)
 
 
 if __name__ == "__main__":

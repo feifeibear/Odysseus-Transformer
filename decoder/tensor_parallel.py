@@ -12,7 +12,7 @@ from utils.comm import allgather_bsz1
 
 
 class LlamaMLPTPSP(nn.Module):
-    def __init__(self, config, pack_weight: bool = True, sequence_parallel=False):
+    def __init__(self, config, pack_weight: bool = True, sequence_parallel=True):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -67,8 +67,8 @@ class LlamaMLPTPSP(nn.Module):
             if not self.sequence_parallel:
                 x = allgather_bsz1(x)
             x_packed = self.w1w3(x)
-            a, b = x_packed.chunk(2, dim=-1)
-            return self.w2(self.act_fn(a * b))
+            a1, a3 = x_packed.chunk(2, dim=-1)
+            return self.w2(self.act_fn(a1) * a3)
         else:
             x = allgather_bsz1(x)
             return self.w2(self.act_fn(self.w1(x)) * self.w3(x))

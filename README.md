@@ -35,12 +35,14 @@ When the sequence length $L$ exceeds the intermediate hidden size $i$ ($L$ > i),
 3. bash run.sh
 
 ### TODO:
-The repo is still work in progress.
+The repo is still work in progress. Contact me if you are interested in this project (fangjiarui123 AT gmail.com).
 
-1. Odysseus and Ring for hybrid parallelism.
-2. Now, the tesh code only support batch size=1. Hybriding parallelism with Data parallel is not considered.
-3. TP-SP conflicts with gradient checkpointing.
+1. Employing hybrid parallelism with Odysseus and Ring-Attention.
+2. Currently limited to batch size of 1; integration of hybrid and data parallelism for batch sizes greater than 1 is not supported.
+3. FSDP appears to conflict with gradient checkpointing.
+4. Loading model checkpoints for Odysseus and TP-SP is not available; parameters are now initialized from scratch.
 
 ### Acknowledgements
 
 [jzhang38/EasyContext](https://github.com/jzhang38/EasyContext)
+
