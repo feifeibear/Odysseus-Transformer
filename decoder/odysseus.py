@@ -1,9 +1,9 @@
-from utils.comm import allgather_bsz1
-import transformers
+from utils.allgather_bsz1 import allgather_bsz1
 from typing import List, Optional, Tuple, Union
 import warnings
 import torch
 import torch.utils.checkpoint
+from transformers.activations import ACT2FN
 
 try:
     from yunchang.ulysses import UlyssesAttention
@@ -35,8 +35,11 @@ from fairscale.nn.model_parallel.layers import (
     RowParallelLinear,
 )
 from utils.linear import ColumnParallelLinearAG, RowParallelLinearRS
+from utils.linear_zero3 import LinearZeRO3
 
 logger = logging.get_logger(__name__)
+
+from torch import nn
 
 
 class LlamaFlashAttention2TPSP(LlamaFlashAttention2):
@@ -268,11 +271,39 @@ class LlamaFlashAttention2TPSP(LlamaFlashAttention2):
         return attn_output, attn_weights, past_key_value
 
 
-def apply_odysseus_attn_patch_llama(model):
+class LlamaMLPZeRO(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.hidden_size = config.hidden_size
+        self.intermediate_size = config.intermediate_size
+        mlp_bias = False
+        self.gate_up_proj = LinearZeRO3(
+            self.hidden_size, self.intermediate_size * 2, bias=mlp_bias
+        )
+        self.down_proj = LinearZeRO3(
+            self.intermediate_size, self.hidden_size, bias=mlp_bias
+        )
+        self.act_fn = ACT2FN[config.hidden_act]
+
+    def forward(self, x):
+        if self.config.pretraining_tp > 1:
+            raise NotImplementedError("pretraining_tp > 1 is not supported yet.")
+        else:
+            x_packed = self.gate_up_proj(x)
+            a1, a3 = x_packed.chunk(2, dim=-1)
+            return self.down_proj(self.act_fn(a1) * a3)
+
+
+def apply_odysseus_attn_patch_llama(model, use_zero3_linear=True):
     for i in range(model.config.num_hidden_layers):
         new_module = LlamaFlashAttention2TPSP(
             model.config,
             i,
         ).to(model.dtype)
         model.model.layers[i].self_attn = new_module
+
+        if use_zero3_linear:
+            new_mlp = LlamaMLPZeRO(model.config).to(model.dtype)
+            model.model.layers[i].mlp = new_mlp
     print("Applied Odysseus patch for LlamaFlashAttn")

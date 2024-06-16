@@ -8,11 +8,17 @@ from fairscale.nn.model_parallel.layers import (
     RowParallelLinear,
 )
 from transformers.activations import ACT2FN
-from utils.comm import allgather_bsz1
+from utils.allgather_bsz1 import allgather_bsz1
 
 
 class LlamaMLPTPSP(nn.Module):
-    def __init__(self, config, pack_weight: bool = True, sequence_parallel=True):
+    def __init__(
+        self,
+        config,
+        pack_weight: bool = True,
+        sequence_parallel=True,
+        keep_master_weight_for_test=False,
+    ):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -31,6 +37,7 @@ class LlamaMLPTPSP(nn.Module):
                     self.intermediate_size * 2,
                     bias=use_bias,
                     gather_output=False,
+                    keep_master_weight_for_test=keep_master_weight_for_test,
                 )
             else:
                 self.w1w3 = ColumnParallelLinear(
@@ -38,6 +45,7 @@ class LlamaMLPTPSP(nn.Module):
                     self.intermediate_size * 2,
                     bias=use_bias,
                     gather_output=False,
+                    keep_master_weight_for_test=keep_master_weight_for_test,
                 )
         else:
             self.w1 = ColumnParallelLinear(
@@ -45,18 +53,21 @@ class LlamaMLPTPSP(nn.Module):
                 self.intermediate_size,
                 bias=use_bias,
                 gather_output=False,
+                keep_master_weight_for_test=keep_master_weight_for_test,
             )
             self.w3 = ColumnParallelLinear(
                 self.hidden_size,
                 self.intermediate_size,
                 bias=use_bias,
                 gather_output=False,
+                keep_master_weight_for_test=keep_master_weight_for_test,
             )
         self.w2 = RowParallelLinearRS(
             self.intermediate_size,
             self.hidden_size,
             bias=use_bias,
             input_is_parallel=True,
+            keep_master_weight_for_test=keep_master_weight_for_test,
         )
 
     def forward(self, x):
