@@ -1,4 +1,4 @@
-from utils.allgather_bsz1 import allgather_bsz1
+from utils.allgather import allgather_bsz1
 from typing import List, Optional, Tuple, Union
 import warnings
 import torch
@@ -34,7 +34,7 @@ from fairscale.nn.model_parallel.layers import (
     ColumnParallelLinear,
     RowParallelLinear,
 )
-from utils.linear import ColumnParallelLinearAG, RowParallelLinearRS
+from utils.linear_tpsp import ColumnParallelLinearAG, RowParallelLinearRS
 from utils.linear_zero3 import LinearZeRO3
 
 logger = logging.get_logger(__name__)

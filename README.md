@@ -61,3 +61,13 @@ The repo is still work in progress. Contact me if you are interested in this pro
 
 [jzhang38/EasyContext](https://github.com/jzhang38/EasyContext)
 
+### Citation
+
+If you apply Odysseus in you project, I I kindly request that you acknowledge my contribution with the following citation.
+
+@misc{fang2024odysseus,
+  title={Odysseus: Upgrade DeepSpeed-Ulysses by Decoupling the Parallel Strategies of Attention and MLP},
+  author={Fang, Jiarui},
+  howpublished={\url{https://github.com/feifeibear/Odysseus-Transformer}},
+  year={2024},
+}
