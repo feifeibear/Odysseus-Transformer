@@ -13,7 +13,7 @@ from fairscale.nn.model_parallel.mappings import (
 )
 import os
 from transformers import LlamaConfig
-from utils.allgather_bsz1 import allgather_bsz1
+from utils.allgather import allgather_bsz1
 
 
 def compare_forward_results():

@@ -1,5 +1,5 @@
 from decoder.odysseus import LlamaFlashAttention2TPSP
-from utils.linear import ColumnParallelLinearAG, RowParallelLinearRS
+from utils.linear_tpsp import ColumnParallelLinearAG, RowParallelLinearRS
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -8,7 +8,7 @@ from fairscale.nn.model_parallel.layers import (
     RowParallelLinear,
 )
 from transformers.activations import ACT2FN
-from utils.allgather_bsz1 import allgather_bsz1
+from utils.allgather import allgather_bsz1
 
 
 class LlamaMLPTPSP(nn.Module):
