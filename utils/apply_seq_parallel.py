@@ -124,7 +124,7 @@ def prepare_zigzag_ring_attn_inputs(
         local_target_ids = None
     return {
         "local_input_ids": local_input_ids,
-        "local_position_ids": local_position_ids,
+        "local_position_ids": local_position_ids.to(device),
         "local_target_ids": local_target_ids,
     }
 
