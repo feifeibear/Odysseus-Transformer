@@ -25,18 +25,22 @@ When the sequence length $L$ exceeds the intermediate hidden size $i$ ($L$ > i),
 |-----------------|------------|--------------|----------|--------------------------|------------|------------|
 | TP              | 2AllReduce | 4O(Ld)       | 0        | 0                        | full       | 1/N        |
 | TP-SP           | 6RS+4AG    | 4O(Ld)       | 0        | 0                        | 1/N        | 1/N        |
-| Ulysses+ZeRO3   | 4All2All   | 4O(Ld)       | AllReduce| 4O($d^2$)+2O(di)           | 1/N        | 1/N      |
-| Ring+ZeRO3      | P2P        | 2O(Ld)       | AllReduce| 4O($d^2$)+2O(di)           | 1/N        | 1/N      |
-| Odysseus+ZeRO3  | 3RS+2AG    | 2O(Ld)       | AllReduce (MLP) | 2O(di) | 1/N        | 1/N        |
+| Ulysses+ZeRO3   | 4All2All   | 4O(Ld)       | RS+2AG| 4O($d^2$)+3O(di)           | 1/N        | 1/N      |
+| Ring+ZeRO3      | P2P        | 2O(Ld)       | RS+2AG| 4O($d^2$)+3O(di)           | 1/N        | 1/N      |
+| Odysseus+ZeRO3  | 3RS+2AG    | 2O(Ld)       | RS+2AG (MLP) | 3O(di) | 1/N        | 1/N        |
 
 
 We conducted a benchmark of the four methods on 8xA100 GPUs, with a global batch size of 1 and without applying gradient checkpointing or offload. The elapsed time and memory usage are presented below. **The results differ from the analysis presented above.**
 
-1. TP-SP demonstrates the highest memory efficiency. Despite the theoretical equivalence in memory consumption between the four methods, we suspect that FSDP's memory efficiency is inferior to manually partitioning the weights of Linear layers.
-2. Odysseus and Ulysses usually exhibit slightly better performance, but the difference is marginal compared to TP-SP. Notably, TP-SP shows a performance advantage at 64K. We attribute this discrepancy to potential performance issues introduced by FSDP.
+1. Odysseus and TP-SP demonstrates the better memory efficiency than Ulysses and Ring. Despite the theoretical equivalence in memory consumption between the four methods, we suspect that FSDP's memory efficiency is inferior to manually partitioning the weights of Linear layers.
+2. Odysseus and TP-SP exhibit similar speed. However, the Odysseus MLP ZeRO section, where both AG (AllGather) and RS (ReduceScatter) operation are synchronized, still has room for applying async versions.
 
 <div align="center">
     <img src="./media/odysseus_perf.png" alt="Image description">
+</div>
+
+<div align="center">
+    <img src="./media/ody_perf_2.png" alt="Image description">
 </div>
 
 ### Usage
@@ -49,9 +53,9 @@ The repo is still work in progress. Contact me if you are interested in this pro
 
 1. Employing hybrid parallelism with Odysseus and Ring-Attention.
 2. Currently limited to batch size of 1; integration of hybrid and data parallelism for batch sizes greater than 1 is not supported.
-3. FSDP appears to conflict with gradient checkpointing.
+3. Applying the gradient checkpointing.
 4. Loading model checkpoints for Odysseus and TP-SP is not available; parameters are now initialized from scratch.
-5. MoE supports
+5. Supporting MoE architectures. 
 
 ### Acknowledgements
 

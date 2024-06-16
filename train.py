@@ -63,8 +63,7 @@ def main(args):
     dev = torch.device(f"cuda:{local_rank}")
     _set_global_memory_buffer(dev)
 
-    use_cfg = False
-    if use_cfg:
+    if args.use_cfg_init_model:
         cfg = LlamaConfig()
         cfg.hidden_size = 4096
         cfg.intermediate_size = 11008
@@ -90,6 +89,8 @@ def main(args):
         print(f"total parameters {total_params/1e9:.2f}B")
 
     if args.parallel_mode == "odysseus":
+        if tp_rank == 0:
+            print(f"use odysseus zero3 {args.use_ody_zero3}")
         apply_odysseus_attn_patch_llama(model, use_zero3_linear=args.use_ody_zero3)
     elif args.parallel_mode == "ulysses":
         apply_ulysses_attn_monkey_patch_llama()
@@ -251,8 +252,9 @@ if __name__ == "__main__":
     args.add_argument("--cpu-offload", action="store_true", default=False)
     args.add_argument("--grad-checkpoint", action="store_true", default=False)
     args.add_argument("--use_zero2", action="store_true", default=False)
-    args.add_argument("--use_ody_zero3", action="store_true", default=False)
+    args.add_argument("--use_ody_zero3", action="store_true", default=True)
     args.add_argument("--use_profiler", action="store_true", default=False)
+    args.add_argument("--use_cfg_init_model", action="store_true", default=False)
     args.add_argument(
         "--parallel_mode",
         type=str,
