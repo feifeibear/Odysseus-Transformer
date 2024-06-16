@@ -23,11 +23,11 @@ When the sequence length $L$ exceeds the intermediate hidden size $i$ ($L$ > i),
 
 | Method          | Comm Activation | Comm Volume       | Comm Gradient | Comm Volume                   | Mem Activation | Mem Param/Grad |
 |-----------------|------------|--------------|----------|--------------------------|------------|------------|
-| TP              | 2AllReduce | 4O(Ld)       | 0        | 0                        | full       | 1/N        |
-| TP-SP           | 6RS+4AG    | 4O(Ld)       | 0        | 0                        | 1/N        | 1/N        |
-| Ulysses+ZeRO3   | 4All2All   | 4O(Ld)       | RS+2AG (FUll) | 4O($d^2$)+3O(di)           | 1/N        | 1/N      |
-| Ring+ZeRO3      | P2P        | 2O(Ld)       | RS+2AG (Full) | 4O($d^2$)+3O(di)           | 1/N        | 1/N      |
-| Odysseus+ZeRO3  | 3RS+2AG    | 2O(Ld)       | RS+2AG (MLP) | 3O(di) | 1/N        | 1/N        |
+| TP              | 2AllReduce | 8O(Ld)       | 0        | 0                        | full       | 1/N        |
+| TP-SP           | 6RS+4AG    | 10O(Ld)       | 0        | 0                        | 1/N        | 1/N        |
+| Ulysses+ZeRO3   | 8All2All   | 8O(Ld)       | RS+2AG (Full) | 4O($d^2$)+3O(di)           | 1/N        | 1/N      |
+| Ring+ZeRO3      | P2Ps       | 4O(Ld)       | RS+2AG (Full) | 4O($d^2$)+3O(di)           | 1/N        | 1/N      |
+| Odysseus+ZeRO3  | 3RS+2AG    | 5O(Ld)       | RS+2AG (MLP) | 3O(di) | 1/N        | 1/N        |
 
 
 We conducted a benchmark of the four methods on 8xA100 GPUs, with a global batch size of 1 and without applying gradient checkpointing or offload. The elapsed time and memory usage are presented below. **The results differ from the analysis presented above.**
