@@ -26,7 +26,7 @@ When the sequence length $L$ exceeds the intermediate hidden size $i$ ($L$ > i),
 |-----------------|------------|--------------|----------|--------------------------|------------|------------|
 | TP              | 2AllReduce | 8O(Ld)       | 0        | 0                        | full       | 1/N        |
 | TP-SP           | 6RS+4AG    | 10O(Ld)       | 0        | 0                        | 1/N        | 1/N        |
-| Ulysses+ZeRO3   | 8All2All   | 8O(Ld)/P      | RS+2AG (Full) | 4O($d^2$)+3O(di)           | 1/N        | 1/N      |
+| Ulysses+ZeRO3   | 8All2All   | 8O(Ld)/N      | RS+2AG (Full) | 4O($d^2$)+3O(di)           | 1/N        | 1/N      |
 | Ring+ZeRO3      | P2Ps       | 4O(Ld)       | RS+2AG (Full) | 4O($d^2$)+3O(di)           | 1/N        | 1/N      |
 | Odysseus+ZeRO3  | 3RS+2AG    | 5O(Ld)       | RS+2AG (MLP) | 3O(di) | 1/N        | 1/N        |
 
